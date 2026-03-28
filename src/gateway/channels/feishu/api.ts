@@ -113,10 +113,22 @@ export class FeishuApiClient {
   }
 
   /**
-   * Get bot info
+   * Get bot info - uses raw fetch since this endpoint returns bot directly (not in data wrapper)
    */
-  async getBotInfo(): Promise<{ app_id: string; app_name: string; tenant_key: string }> {
-    return this.request('GET', '/bot/v3/info');
+  async getBotInfo(): Promise<{ app_id: string; app_name: string; open_id: string }> {
+    const token = await this.getToken();
+    const response = await fetch(`${FEISHU_API_BASE}/bot/v3/info`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const json = (await response.json()) as { code: number; msg: string; bot: { activate_status: number; app_name: string; open_id: string } };
+    if (json.code !== 0) {
+      throw new Error(`Failed to get bot info: ${json.msg} (code: ${json.code})`);
+    }
+    return {
+      app_id: this.appId, // Use the appId from credentials
+      app_name: json.bot.app_name,
+      open_id: json.bot.open_id,
+    };
   }
 
   /**
