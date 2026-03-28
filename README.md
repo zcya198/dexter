@@ -149,6 +149,22 @@ Each file contains newline-delimited JSON entries tracking:
 
 This makes it easy to inspect exactly what data the agent gathered and how it interpreted results.
 
+## 🤖 How to Use with Feishu (飞书)
+
+Dexter can also be used as a Feishu Bot! See [src/gateway/channels/feishu/README.md](src/gateway/channels/feishu/README.md) for setup instructions.
+
+Quick start:
+```bash
+# Set credentials
+export FEISHU_APP_ID=cli_xxx
+export FEISHU_APP_SECRET=xxx
+
+# Start the Feishu bot server
+bun run src/gateway/channels/feishu/server.ts
+```
+
+Then configure the webhook URL in your Feishu app's event subscriptions and start chatting!
+
 ## 📱 How to Use with WhatsApp
 
 Chat with Dexter through WhatsApp by linking your phone to the gateway. Messages you send to yourself are processed by Dexter and responses are sent back to the same chat.
