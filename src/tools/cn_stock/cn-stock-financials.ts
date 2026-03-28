@@ -1,108 +1,38 @@
 import { DynamicStructuredTool } from '@langchain/core/tools';
 import { z } from 'zod';
 import { formatToolResult } from '../types.js';
-import { normalizeStockCode } from './cn-stock-api.js';
-import { logger } from '../../utils/logger.js';
-
-// ============================================================
-// East Money Financial Data API
-// ============================================================
-
-const EM_BASE = 'https://datacenter.eastmoney.com/securities/api/data/v1/get';
-
-/**
- * Fetch financial indicator data from East Money
- */
-async function fetchEastMoneyFinancial(
-  code: string,
-  type: 'income' | 'balance' | 'cashflow' | 'indicator'
-): Promise<Record<string, unknown>> {
-  const normalized = normalizeStockCode(code);
-  const marketCode = normalized.startsWith('sh') ? '1' : '0';
-  const codeNum = normalized.replace(/\D/g, '');
-  
-  // Map report types to East Money API report types
-  const reportTypeMap: Record<string, string> = {
-    income: 'ProfitStatement',
-    balance: 'BalanceSheet',
-    cashflow: 'CashFlowStatement',
-    indicator: 'FinancialAnalysis',
-  };
-  
-  const rtype = reportTypeMap[type];
-  
-  // Use the correct API endpoint format
-  const url = `${EM_BASE}?reportName=${encodeURIComponent(`RPT_LICO_FN_${rtype}`)}&columns=SECURITY_CODE,REPORT_DATE,${getColumnsForType(type)}&filter=(SECURITY_CODE="${codeNum}")&pageNumber=1&pageSize=12&sortTypes=-1&sortColumns=REPORT_DATE&source=DataCenter&client=PC`;
-  
-  logger.info(`[CN Stock Financials] Fetching ${type} for ${code}`);
-  
-  try {
-    const response = await fetch(url, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
-        'Referer': 'https://data.eastmoney.com/',
-      },
-    });
-    
-    if (!response.ok) {
-      throw new Error(`East Money API error: ${response.status}`);
-    }
-    
-    const json = await response.json() as { result?: { data?: unknown[] } };
-    
-    if (!json.result?.data) {
-      return { stocks: [], source: 'East Money (东方财富)' };
-    }
-    
-    return {
-      stock_code: code,
-      report_type: type,
-      data: json.result.data,
-      source: 'East Money (东方财富)',
-      count: json.result.data.length,
-    };
-  } catch (error) {
-    logger.error(`[CN Stock Financials] Error: ${error}`);
-    throw error;
-  }
-}
-
-function getColumnsForType(type: string): string {
-  switch (type) {
-    case 'income':
-      return 'TOTAL_OPERATE_INCOME,OPERATE_INCOME,OPERATE_PROFIT,INVEST_INCOME,NON_OPERATE_INCOME,TOTAL_PROFIT,NET_PROFIT,EPS_BASIC,EPS_DILUTED';
-    case 'balance':
-      return 'TOTAL_ASSETS,TOTAL_LIABILITIES,MINORITY_INTEREST,NET_ASSETS,OPERATE_CASHFLOW,NET_CASHFLOW,TOTAL_CURRENT_ASSETS,TOTAL_CURRENT_LIABILITIES';
-    case 'cashflow':
-      return 'MANAGE_CASHFLOW,INVEST_CASHFLOW,FINANCE_CASHFLOW,CASH_EQUIVALENT,NET_CASHFLOW';
-    case 'indicator':
-      return 'ROE_WEIGHTED,ROE_DILUTED,NET_PROFIT_MARGIN,GROSS_PROFIT_MARGIN,DEBT_ASSET_RATIO,EPS_TTM,OPERATE_CASHFLOW_PS,BASIC_PS';
-    default:
-      return '*';
-  }
-}
+import { fetchEastMoneyFinancials } from './cn-stock-api.js';
 
 // ============================================================
 // Tool Definitions
+// All tools use the same East Money API endpoint (type=0) which provides
+// comprehensive financial data including income, indicators, and key metrics.
 // ============================================================
 
 export const CN_INCOME_STATEMENT_DESCRIPTION = `
-Fetches income statement (利润表) data for Chinese A-share companies. 
-Includes revenue, operating profit, total profit, net profit, EPS, etc.
+Fetches income statement (利润表) and key financial indicators for Chinese A-share companies.
+Includes revenue, operating profit, net profit, EPS, ROE, profit margins, debt ratios, etc.
 
 ## When to Use
 - "贵州茅台2024年年报" (Kweichow Moutai 2024 annual report)
 - "招商银行近3年营业收入" (CMB revenue last 3 years)
 - "中国平安季度净利润" (Ping An quarterly net profit)
+- "贵州茅台ROE和毛利率" (ROE and gross margin)
 
 ## Input
 - Chinese stock code (e.g., '600519', 'sh600519', '000858')
-- Date range is auto-inferred but limited to last 12 periods
+- Returns last 12 reporting periods (mix of annual and quarterly)
+
+## Key Fields in Response
+- 营业总收入, 归属净利润, 扣非净利润
+- 加权净资产收益率_ROE, 销售毛利率, 销售净利率
+- 基本每股收益_EPS, 每股净资产_BPS
+- 资产负债率, 流动比率, 速动比率
 `.trim();
 
 const CNIncomeStatementInputSchema = z.object({
   code: z.string().describe("Chinese stock code. Examples: '600519' (Kweichow Moutai), '000858' (Wuliangye), 'sh600519'"),
-  period: z.enum(['annual', 'quarterly']).default('annual').describe('Reporting period type'),
+  period: z.enum(['annual', 'quarterly']).default('annual').describe('Reporting period type (annual or quarterly)'),
 });
 
 export const getCnIncomeStatement = new DynamicStructuredTool({
@@ -111,8 +41,15 @@ export const getCnIncomeStatement = new DynamicStructuredTool({
   schema: CNIncomeStatementInputSchema,
   func: async (input) => {
     try {
-      const data = await fetchEastMoneyFinancial(input.code, 'income');
-      return formatToolResult(data, ['https://data.eastmoney.com/']);
+      const data = await fetchEastMoneyFinancials(input.code, 'income');
+      // Filter by period type if specified
+      let filtered = data.data as Record<string, unknown>[];
+      if (input.period === 'annual') {
+        filtered = filtered.filter((r) => String(r['报告类型'] || '').includes('年报'));
+      } else {
+        filtered = filtered.filter((r) => !String(r['报告类型'] || '').includes('年报'));
+      }
+      return formatToolResult({ ...data, data: filtered }, ['https://emweb.securities.eastmoney.com/PC_HSF10/NewFinanceAnalysis/']);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       return formatToolResult({ error: message }, []);
@@ -121,13 +58,18 @@ export const getCnIncomeStatement = new DynamicStructuredTool({
 });
 
 export const CN_BALANCE_SHEET_DESCRIPTION = `
-Fetches balance sheet (资产负债表) data for Chinese A-share companies.
-Includes total assets, total liabilities, net assets, equity, etc.
+Fetches balance sheet data and per-share metrics for Chinese A-share companies.
+Note: The East Money API provides comprehensive data including both per-share metrics (BPS, per-share cash) and key balance-related indicators.
 
 ## When to Use
 - "工商银行总资产" (ICBC total assets)
 - "比亚迪资产负债率" (BYD debt-to-asset ratio)
 - "万科净资产" (Vanke net assets)
+- "贵州茅台每股现金流" (Kweichow Moutai per-share cash flow)
+
+## Key Fields in Response
+- 每股净资产_BPS, 每股资本公积, 每股未分配利润
+- 每股经营现金流, 资产负债率, 流动比率, 速动比率
 `.trim();
 
 const CNBalanceSheetInputSchema = z.object({
@@ -141,8 +83,8 @@ export const getCnBalanceSheet = new DynamicStructuredTool({
   schema: CNBalanceSheetInputSchema,
   func: async (input) => {
     try {
-      const data = await fetchEastMoneyFinancial(input.code, 'balance');
-      return formatToolResult(data, ['https://data.eastmoney.com/']);
+      const data = await fetchEastMoneyFinancials(input.code, 'balance');
+      return formatToolResult(data, ['https://emweb.securities.eastmoney.com/PC_HSF10/NewFinanceAnalysis/']);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       return formatToolResult({ error: message }, []);
@@ -151,12 +93,16 @@ export const getCnBalanceSheet = new DynamicStructuredTool({
 });
 
 export const CN_CASHFLOW_DESCRIPTION = `
-Fetches cash flow statement (现金流量表) data for Chinese A-share companies.
-Includes operating cash flow, investment cash flow, financing cash flow, etc.
+Fetches per-share cash flow metrics for Chinese A-share companies.
+Includes operating cash flow per share, investing cash flow indicators, etc.
 
 ## When to Use
-- "贵州茅台经营现金流" (Kweichow Moutai operating cash flow)
+- "贵州茅台经营现金流" (Kweichow Moutai operating cash flow per share)
 - "宁德时代现金流状况" (CATL cash flow status)
+- "每股经营现金流分析" (Per-share operating cash flow analysis)
+
+## Key Fields in Response
+- 每股经营现金流, 每股未分配利润, 每股资本公积
 `.trim();
 
 const CNCashFlowInputSchema = z.object({
@@ -170,8 +116,8 @@ export const getCnCashFlowStatement = new DynamicStructuredTool({
   schema: CNCashFlowInputSchema,
   func: async (input) => {
     try {
-      const data = await fetchEastMoneyFinancial(input.code, 'cashflow');
-      return formatToolResult(data, ['https://data.eastmoney.com/']);
+      const data = await fetchEastMoneyFinancials(input.code, 'cashflow');
+      return formatToolResult(data, ['https://emweb.securities.eastmoney.com/PC_HSF10/NewFinanceAnalysis/']);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       return formatToolResult({ error: message }, []);
@@ -180,13 +126,21 @@ export const getCnCashFlowStatement = new DynamicStructuredTool({
 });
 
 export const CN_INDICATORS_DESCRIPTION = `
-Fetches key financial indicators for Chinese A-share companies.
-Includes ROE, profit margins, debt ratio, EPS, etc.
+Fetches key financial indicators and valuation metrics for Chinese A-share companies.
+Includes ROE, profit margins, debt ratios, EPS, BPS, ROIC, etc.
 
 ## When to Use
 - "贵州茅台ROE" (Kweichow Moutai ROE)
 - "比亚迪毛利率" (BYD gross margin)
 - "工商银行估值" (ICBC valuation metrics)
+- "五粮液盈利能力对比" (Wuliangye profitability comparison)
+
+## Key Fields in Response
+- ROE: 加权净资产收益率_ROE, 扣非净资产收益率
+- Margins: 销售毛利率, 销售净利率, 营业利润率
+- Valuation: 基本每股收益_EPS, 每股净资产_BPS, 资产负债率
+- Efficiency: 总资产周转率, 存货周转率, 应收账款周转率
+- Growth: 营业总收入增长率, 净利润增长率, 扣非净利润增长率
 `.trim();
 
 const CNIndicatorInputSchema = z.object({
@@ -199,8 +153,8 @@ export const getCnFinancialIndicators = new DynamicStructuredTool({
   schema: CNIndicatorInputSchema,
   func: async (input) => {
     try {
-      const data = await fetchEastMoneyFinancial(input.code, 'indicator');
-      return formatToolResult(data, ['https://data.eastmoney.com/']);
+      const data = await fetchEastMoneyFinancials(input.code, 'indicator');
+      return formatToolResult(data, ['https://emweb.securities.eastmoney.com/PC_HSF10/NewFinanceAnalysis/']);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       return formatToolResult({ error: message }, []);
