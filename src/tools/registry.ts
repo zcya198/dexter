@@ -1,5 +1,6 @@
 import { StructuredToolInterface } from '@langchain/core/tools';
 import { createGetFinancials, createGetMarketData, createReadFilings, createScreenStocks } from './finance/index.js';
+import { createGetCnStockData, GET_CN_STOCK_DATA_DESCRIPTION } from './cn_stock/index.js';
 import { exaSearch, perplexitySearch, tavilySearch, WEB_SEARCH_DESCRIPTION, xSearchTool, X_SEARCH_DESCRIPTION } from './search/index.js';
 import { skillTool, SKILL_TOOL_DESCRIPTION } from './skill.js';
 import { webFetchTool, WEB_FETCH_DESCRIPTION } from './fetch/web-fetch.js';
@@ -46,6 +47,11 @@ export function getToolRegistry(model: string): RegisteredTool[] {
       name: 'get_market_data',
       tool: createGetMarketData(model),
       description: GET_MARKET_DATA_DESCRIPTION,
+    },
+    {
+      name: 'get_cn_stock_data',
+      tool: createGetCnStockData(model),
+      description: GET_CN_STOCK_DATA_DESCRIPTION,
     },
     {
       name: 'read_filings',

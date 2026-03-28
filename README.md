@@ -27,6 +27,7 @@ Dexter takes complex financial questions and turns them into clear, step-by-step
 - **Self-Validation**: Checks its own work and iterates until tasks are complete
 - **Real-Time Financial Data**: Access to income statements, balance sheets, and cash flow statements
 - **Safety Features**: Built-in loop detection and step limits to prevent runaway execution
+- **🇨🇳 Chinese A-Share Support**: Real-time quotes, financial statements, and key indicators for Chinese stocks (A-shares) via Tencent Finance and East Money APIs
 
 [![Twitter Follow](https://img.shields.io/twitter/follow/virattt?style=social)](https://twitter.com/virattt) [![Discord](https://img.shields.io/badge/Discord-Join%20Server-5865F2?style=social&logo=discord)](https://discord.gg/jpGHv2XB6T)
 
@@ -37,8 +38,9 @@ Dexter takes complex financial questions and turns them into clear, step-by-step
 
 - [Bun](https://bun.com) runtime (v1.0 or higher)
 - OpenAI API key (get [here](https://platform.openai.com/api-keys))
-- Financial Datasets API key (get [here](https://financialdatasets.ai))
+- Financial Datasets API key (get [here](https://financialdatasets.ai)) - for US stocks
 - Exa API key (get [here](https://exa.ai)) - optional, for web search
+- **Chinese A-Shares**: No API key required (uses Tencent Finance & East Money public APIs)
 
 #### Installing Bun
 
